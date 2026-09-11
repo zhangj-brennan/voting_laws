@@ -21,7 +21,22 @@
   .footnote { width: 100%; }
   .legend { padding-left: 0; padding-right: 0; }
   .legend-buckets { flex-wrap: wrap; row-gap: 6px; }
-  .legend-bucket { flex-direction: row; align-items: center; gap: 6px; }
+  .legend-bucket {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 3px 6px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: none;
+    color: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .legend-bucket:hover { border-color: #bbb; }
+  .legend-bucket.is-active { border-color: #000; }
+  .legend-bucket.is-dimmed { opacity: 0.45; }
+  .legend-bucket:focus-visible { outline: 2px solid #000; outline-offset: 2px; }
 
   #map text.abbr { font-size: 22px; letter-spacing: 2px; }
   g.callout text.callout-value {
@@ -189,8 +204,10 @@ const LEGEND_ITEMS = CATEGORIES;
 const legendBuckets = d3.select("#legend-buckets")
   .selectAll(".legend-bucket")
   .data(LEGEND_ITEMS)
-  .join("div")
-  .attr("class", "legend-bucket");
+  .join("button")
+  .attr("type", "button")
+  .attr("class", "legend-bucket")
+  .attr("aria-pressed", "false");
 
 legendBuckets
   .append("div")
@@ -403,6 +420,33 @@ Promise.all([
     .attr("class", "callout-value")
     .text((d) => (d.category === null ? d.abbr : `${d.abbr} ${categoryShort.get(d.category)}`));
 
+  // ---- Legend filter buttons ----
+  // Clicking a legend swatch toggles that category as an active filter.
+  // With no filters active, everything shows at full strength; with one or
+  // more active, non-matching states (including no-data states) dim out.
+  const FILTER_DIM_OPACITY = 0.12;
+  const activeFilters = new Set();
+
+  function filterOpacityFor(d) {
+    return activeFilters.size === 0 || activeFilters.has(d.category) ? 1 : FILTER_DIM_OPACITY;
+  }
+
+  function refreshFilter() {
+    legendBuckets
+      .classed("is-active", (d) => activeFilters.has(d.key))
+      .classed("is-dimmed", (d) => activeFilters.size > 0 && !activeFilters.has(d.key))
+      .attr("aria-pressed", (d) => String(activeFilters.has(d.key)));
+    update(currentT);
+  }
+
+  function toggleFilter(key) {
+    if (activeFilters.has(key)) activeFilters.delete(key);
+    else activeFilters.add(key);
+    refreshFilter();
+  }
+
+  legendBuckets.on("click", (event, d) => toggleFilter(d.key));
+
   // t=0 is the true geographic map, t=1 the equal-area grid. The handful of
   // states too small to hold even one label in true geographic view
   // (CALLOUT_STATES) get an external label on a leader line instead, which
@@ -414,19 +458,19 @@ Promise.all([
   function update(t) {
     paths
       .attr("d", (d) => (t === 0 ? d.fullGeoD : d.interp(t)))
-      .style("opacity", (d) => (d.abbr === "DC" ? 1 - t : 1));
+      .style("opacity", (d) => (d.abbr === "DC" ? 1 - t : 1) * filterOpacityFor(d));
     labels
       .attr("transform", (d) => {
         const x = d.labelGeoC[0] + (d.gridC[0] - d.labelGeoC[0]) * t;
         const y = d.labelGeoC[1] + (d.gridC[1] - d.labelGeoC[1]) * t;
         return `translate(${x},${y})`;
       })
-      .style("opacity", (d) => (d.isCallout ? t : 1));
+      .style("opacity", (d) => (d.isCallout ? t : 1) * filterOpacityFor(d));
     labels
       .select("text.abbr")
       .style("font-size", `${GEO_LABEL_SIZE + (GRID_LABEL_SIZE - GEO_LABEL_SIZE) * t}px`);
-    callouts.style("opacity", 1 - t);
-    calloutLines.style("opacity", 1 - t);
+    callouts.style("opacity", (d) => (1 - t) * filterOpacityFor(d));
+    calloutLines.style("opacity", (d) => (1 - t) * filterOpacityFor(d));
   }
 
   const toggleBtn = document.getElementById("toggle");
