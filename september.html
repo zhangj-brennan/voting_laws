@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>State Voting Laws Enacted January 1 2024 to September 1 2026</title>
+<!--
+  Geographic view state boundaries: US Census Bureau, via us-atlas
+  (states-10m.json, bundled locally), https://github.com/topojson/us-atlas.
+  Shape morphing: Flubber, https://github.com/veltman/flubber.
+-->
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flubber@0.4.2/build/flubber.min.js"></script>
+<style>
+  /* ---- page-specific sizing + legend, additive to style.css ---- */
+  #container { max-width: 800px; margin: 10px auto; padding: 0 10px; }
+  .panel { margin-top: 0; }
+  .map-wrap { max-width: 700px; margin-left: auto; margin-right: auto; }
+  .footnote { width: 100%; }
+  .legend { padding-left: 0; padding-right: 0; }
+  .legend-buckets { flex-wrap: wrap; row-gap: 6px; }
+  .legend-bucket { flex-direction: row; align-items: center; gap: 6px; }
+
+  #map text.abbr { font-size: 22px; letter-spacing: 2px; }
+  g.callout text.callout-value {
+    font-family: "BentonMedium";
+    font-size: 22px;
+  }
+
+  /* "Geographic" and "Grid" are unequal widths, which would otherwise skew
+     the switch off-center within the centered flex group */
+  .view-toggle { margin-right: 0; }
+  .view-toggle #labelGeo { min-width: 66px; text-align: right; }
+  .view-toggle #labelGrid { min-width: 66px; text-align: left; }
+  .controls { padding-bottom: 4px; justify-content: center; }
+  #status { padding: 40px 20px; }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="title">
+    <h1>State Voting Laws Enacted January 1 2024 to September 1 2026</h1>
+  </div>
+
+  <div class="legend">
+    <div class="legend-buckets" id="legend-buckets"></div>
+  </div>
+
+  <div class="panel">
+    <div class="map-wrap">
+      <svg id="map"></svg>
+      <div id="status" class="status">Loading state boundaries…</div>
+    </div>
+    <div class="controls">
+      <div class="view-toggle">
+        <span class="toggle-label" id="labelGeo">Geographic</span>
+        <button class="switch" id="toggle" role="switch" aria-checked="false" aria-label="Toggle between geographic and grid view">
+          <span class="switch-knob"></span>
+        </button>
+        <span class="toggle-label" id="labelGrid">Grid</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footnote" style="margin-top:4px">
+    <strong>Source:</strong> The Brennan Center for Justice.<br />
+    <strong>Note:</strong> Parenthetical years are year enacted, and not legislative session.
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// full state name -> 2-letter abbreviation (DC included)
+const NAME_TO_ABBR = {
+  "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR",
+  "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE",
+  "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID",
+  "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS",
+  "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
+  "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS",
+  "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+  "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+  "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK",
+  "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
+  "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT",
+  "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "Washington, DC": "DC",
+  "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"
+};
+const ABBR_TO_NAME = Object.fromEntries(
+  Object.entries(NAME_TO_ABBR).map(([name, abbr]) => [abbr, name])
+);
+
+// Census FIPS code -> abbreviation, for matching us-atlas topojson features.
+const FIPS_TO_ABBR = {
+  "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT","10":"DE","11":"DC",
+  "12":"FL","13":"GA","15":"HI","16":"ID","17":"IL","18":"IN","19":"IA","20":"KS","21":"KY",
+  "22":"LA","23":"ME","24":"MD","25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT",
+  "31":"NE","32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND","39":"OH",
+  "40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD","47":"TN","48":"TX","49":"UT",
+  "50":"VT","51":"VA","53":"WA","54":"WV","55":"WI","56":"WY"
+};
+
+// Equal-area tile-grid layout, abbr -> [col, row], 0-indexed.
+// Reused verbatim from https://zhangj-brennan.github.io/midterms/projected_2030_congressional_reapportionment/
+const GRID = {
+  AK: [0, 0], ME: [10, 0],
+  NH: [10, 1], VT: [9, 1],
+  WA: [0, 2], ID: [1, 2], MT: [2, 2], ND: [3, 2], MN: [4, 2], WI: [5, 2], MI: [6, 2], NY: [7, 2], MA: [9, 2], RI: [10, 2],
+  OR: [0, 3], NV: [1, 3], WY: [2, 3], SD: [3, 3], IA: [4, 3], IL: [5, 3], IN: [6, 3], OH: [7, 3], PA: [8, 3], NJ: [9, 3], CT: [10, 3],
+  CA: [0, 4], UT: [1, 4], CO: [2, 4], NE: [3, 4], MO: [4, 4], KY: [5, 4], WV: [6, 4], VA: [7, 4], MD: [8, 4], DE: [9, 4],
+  AZ: [1, 5], NM: [2, 5], KS: [3, 5], AR: [4, 5], TN: [5, 5], NC: [6, 5], SC: [7, 5], DC: [8, 5],
+  OK: [3, 6], LA: [4, 6], MS: [5, 6], AL: [6, 6], GA: [7, 6],
+  HI: [0, 7], TX: [3, 7], FL: [8, 7]
+};
+
+const COLS = 11, ROWS = 8;
+const CELL = 96, GAP = 7;
+const MARGIN = 20;
+const GRID_W = COLS * CELL + MARGIN * 2, GRID_H = ROWS * CELL + MARGIN * 2;
+
+// The canvas is wider than the grid to leave room for callout labels in the
+// geographic view; center the grid within that full width rather than
+// leaving it pinned to the left.
+const CALLOUT_PAD = 210;
+const CANVAS_W = GRID_W + CALLOUT_PAD;
+const GRID_X_SHIFT = CALLOUT_PAD / 2;
+
+function squarePath(col, row) {
+  const x = GRID_X_SHIFT + MARGIN + col * CELL + GAP / 2;
+  const y = MARGIN + row * CELL + GAP / 2;
+  const s = CELL - GAP;
+  return `M${x},${y}H${x + s}V${y + s}H${x}Z`;
+}
+function squareCentroid(col, row) {
+  return [GRID_X_SHIFT + MARGIN + col * CELL + CELL / 2, MARGIN + row * CELL + CELL / 2];
+}
+
+// Single-ring outline (largest by area) of a state's geometry, in projected
+// coordinates — a shape Flubber can morph against the single-ring grid
+// square. Multi-part states (islands, detached counties) lose the smaller
+// parts in this outline; the full multi-part shape is still used for the
+// resting geographic view.
+function largestRingPath(feature, projection) {
+  const geom = feature.geometry;
+  const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+  let best = null, bestArea = -1;
+  for (const poly of polygons) {
+    const ring = poly[0];
+    const pts = ring.map((pt) => projection(pt)).filter(Boolean);
+    if (pts.length < 3) continue;
+    const area = Math.abs(d3.polygonArea(pts));
+    if (area > bestArea) { bestArea = area; best = pts; }
+  }
+  if (!best) return null;
+  return `M${best.map((p) => p.join(",")).join("L")}Z`;
+}
+
+const tiles = Object.entries(GRID).map(([abbr, [col, row]]) => ({
+  abbr,
+  name: ABBR_TO_NAME[abbr],
+  d: squarePath(col, row),
+  c: squareCentroid(col, row)
+}));
+
+// Categories come from sept_enacted_map.csv's fill_var column.
+const CATEGORIES = [
+  { key: "Expansive Only", color: "--blue", short: "Expansive", label: "Expansive only", textColor: "white" },
+  { key: "Mixed", color: "--purple", short: "Mixed", label: "Mixed", textColor: "white" },
+  { key: "Restrictive or Election Interference Only", color: "#FFCF01", short: "Restrictive", label: "Restrictive or election interference only", textColor: "black" }
+];
+
+const rootStyle = getComputedStyle(document.documentElement);
+const noneColor = rootStyle.getPropertyValue("--div-none").trim();
+const resolveColor = (c) => (c.startsWith("--") ? rootStyle.getPropertyValue(c).trim() : c);
+const categoryColors = new Map(CATEGORIES.map((c) => [c.key, resolveColor(c.color)]));
+const categoryShort = new Map(CATEGORIES.map((c) => [c.key, c.short]));
+const categoryTextColor = new Map(CATEGORIES.map((c) => [c.key, c.textColor]));
+
+function fillFor(category) {
+  if (category === null) return noneColor;
+  return categoryColors.get(category) || noneColor;
+}
+
+const LEGEND_ITEMS = CATEGORIES;
+
+const legendBuckets = d3.select("#legend-buckets")
+  .selectAll(".legend-bucket")
+  .data(LEGEND_ITEMS)
+  .join("div")
+  .attr("class", "legend-bucket");
+
+legendBuckets
+  .append("div")
+  .attr("class", "swatch")
+  .style("background", (d) => (d.key === null ? noneColor : categoryColors.get(d.key)));
+
+legendBuckets.append("span").text((d) => d.label);
+
+// Hand-tuned nudges for labels that collide with a neighboring state or
+// border in the true geographic view. Reused verbatim from representation_gap.html,
+// which shares this exact grid/projection/canvas geometry.
+const LABEL_OFFSETS = {
+  FL: [17, 0],
+  LA: [-5, -6],
+  NH: [0, 3],
+  VT: [-2, -12],
+  WA: [0, 2],
+  NY: [2, 0],
+  KY: [0, 2],
+  CT: [4, -2],
+  WV: [-2, -2],
+  MA: [0, -9],
+  AK: [0, -4],
+  HI: [-8, 0],
+  ME: [0, -2],
+  MI: [8, 8]
+};
+
+// Per-state overrides for label fill color, when the category's default
+// text color doesn't have enough contrast against that state's fill.
+const LABEL_COLOR_OVERRIDES = {
+  CT: "black",
+  HI: "black"
+};
+
+// States too small in true geographic view to hold their own abbr
+// label — given an external label off to the side, joined by a line.
+const CALLOUT_STATES = ["RI", "DE", "NJ", "MD"];
+
+// DC gets no label at all (too small to hold one, and not worth a callout).
+const NO_LABEL_STATES = ["DC"];
+
+const statusEl = document.getElementById("status");
+
+Promise.all([
+  d3.text("sept_enacted_map.csv"),
+  d3.json("states-10m.json")
+]).then(([text, topo]) => {
+  const rows = d3.csvParse(text.replace(/^﻿/, ""));
+
+  const dataByName = new Map();
+  rows.forEach((row) => {
+    let name = row.state;
+    if (!name) return;
+    if (name === "Washington, D.C.") name = "Washington, DC";
+    dataByName.set(name, { details: row.details, category: row.fill_var });
+  });
+
+  const svg = d3.select("#map");
+  const tooltip = d3.select("#tooltip");
+
+  const objectKey = topo.objects.states ? "states" : Object.keys(topo.objects)[0];
+  const fc = topojson.feature(topo, topo.objects[objectKey]);
+  const featureByAbbr = new Map();
+  fc.features.forEach((f) => {
+    const abbr = FIPS_TO_ABBR[String(f.id).padStart(2, "0")];
+    if (abbr) featureByAbbr.set(abbr, f);
+  });
+
+  const projection = d3.geoAlbersUsa().fitSize([GRID_W, GRID_H], fc);
+  const geoPath = d3.geoPath(projection);
+
+  // Crop the viewBox to the actual vertical extent of the content (the
+  // union of the fitted geography's bounds and the tile grid's bounds),
+  // rather than the full GRID_H box, so there's no dead space above/below
+  // in either view.
+  const geoBounds = geoPath.bounds(fc);
+  const gridYTop = MARGIN + GAP / 2;
+  const gridYBottom = MARGIN + ROWS * CELL - GAP / 2;
+  const VIEW_PAD = 6;
+  const viewYTop = Math.min(gridYTop, geoBounds[0][1]) - VIEW_PAD;
+  const viewYBottom = Math.max(gridYBottom, geoBounds[1][1]) + VIEW_PAD;
+  svg.attr("viewBox", `0 ${viewYTop} ${CANVAS_W} ${viewYBottom - viewYTop}`);
+
+  const tileData = tiles.map((tile) => {
+    const f = featureByAbbr.get(tile.abbr);
+    const geoD = f ? largestRingPath(f, projection) : tile.d;
+    const geoC = f ? geoPath.centroid(f) : tile.c;
+    const [dx, dy] = LABEL_OFFSETS[tile.abbr] || [0, 0];
+    const entry = dataByName.get(tile.name) || null;
+    return {
+      ...tile,
+      category: entry ? entry.category : null,
+      details: entry ? entry.details : null,
+      gridD: tile.d,
+      gridC: tile.c,
+      fullGeoD: f ? geoPath(f) : tile.d,
+      geoD,
+      geoC,
+      labelGeoC: [geoC[0] + dx, geoC[1] + 10 + dy],
+      interp: flubber.interpolate(geoD, tile.d, { maxSegmentLength: 6 }),
+      isCallout: CALLOUT_STATES.includes(tile.abbr)
+    };
+  });
+
+  // Stack callout labels in a column to the right of the map, in the same
+  // top-to-bottom order as the states they point to, so leader lines don't cross.
+  const calloutData = tileData
+    .filter((d) => d.isCallout)
+    .sort((a, b) => a.geoC[1] - b.geoC[1]);
+  const CALLOUT_X = GRID_W + 20;
+  const CALLOUT_GAP_Y = 44;
+  const calloutAvgY = d3.mean(calloutData, (d) => d.geoC[1]);
+  const calloutStartY = calloutAvgY - ((calloutData.length - 1) * CALLOUT_GAP_Y) / 2;
+  calloutData.forEach((d, i) => {
+    d.calloutAnchor = [CALLOUT_X, calloutStartY + i * CALLOUT_GAP_Y];
+  });
+
+  statusEl.remove();
+
+  let stickyAbbr = null;
+
+  function showTooltip(event, d) {
+    tooltip
+      .style("opacity", 1)
+      .style("left", `${event.clientX}px`)
+      .style("top", `${event.clientY}px`)
+      .html(
+        d.category === null
+          ? `<strong>${d.name}</strong><br/><span class="sub">No enacted legislation</span>`
+          : `<strong>${d.name}</strong><br/><span class="sub">${d.details}</span>`
+      );
+    tooltip.selectAll("a").attr("target", "_blank").attr("rel", "noopener noreferrer");
+  }
+
+  function closeSticky() {
+    stickyAbbr = null;
+    paths.classed("is-hover", false);
+    tooltip.style("opacity", 0).style("pointer-events", "none");
+  }
+
+  const paths = svg
+    .selectAll("path.state")
+    .data(tileData, (d) => d.abbr)
+    .join("path")
+    .attr("class", (d) => `state${d.category === null ? " state-nodata" : ""}`)
+    .attr("fill", (d) => fillFor(d.category))
+    .on("mousemove", (event, d) => {
+      if (stickyAbbr) return;
+      d3.select(event.currentTarget).classed("is-hover", true);
+      showTooltip(event, d);
+    })
+    .on("mouseleave", (event) => {
+      if (stickyAbbr) return;
+      d3.select(event.currentTarget).classed("is-hover", false);
+      tooltip.style("opacity", 0);
+    })
+    .on("click", (event, d) => {
+      event.stopPropagation();
+      if (stickyAbbr === d.abbr) {
+        closeSticky();
+        return;
+      }
+      paths.classed("is-hover", false);
+      d3.select(event.currentTarget).classed("is-hover", true);
+      stickyAbbr = d.abbr;
+      showTooltip(event, d);
+      tooltip.style("pointer-events", "auto");
+    });
+
+  tooltip.on("click", (event) => event.stopPropagation());
+  d3.select(document).on("click", () => {
+    if (stickyAbbr) closeSticky();
+  });
+
+  const labelColor = (d) =>
+    LABEL_COLOR_OVERRIDES[d.abbr] || (d.category !== null ? categoryTextColor.get(d.category) : null);
+
+  const labels = svg
+    .selectAll("g.state-label")
+    .data(tileData.filter((d) => !NO_LABEL_STATES.includes(d.abbr)), (d) => d.abbr)
+    .join("g")
+    .attr("class", "state-label");
+
+  labels
+    .append("text")
+    .attr("class", "abbr")
+    .style("fill", labelColor)
+    .text((d) => d.abbr);
+
+  const calloutLines = svg
+    .selectAll("polyline.callout-line")
+    .data(calloutData, (d) => d.abbr)
+    .join("polyline")
+    .attr("class", "callout-line")
+    .attr(
+      "points",
+      (d) => `${d.geoC[0]},${d.geoC[1]} ${d.calloutAnchor[0] - 6},${d.calloutAnchor[1]}`
+    );
+
+  const callouts = svg
+    .selectAll("g.callout")
+    .data(calloutData, (d) => d.abbr)
+    .join("g")
+    .attr("class", "callout")
+    .attr("transform", (d) => `translate(${d.calloutAnchor[0]},${d.calloutAnchor[1]})`);
+
+  callouts
+    .append("text")
+    .attr("class", "callout-value")
+    .text((d) => (d.category === null ? d.abbr : `${d.abbr} ${categoryShort.get(d.category)}`));
+
+  // t=0 is the true geographic map, t=1 the equal-area grid. The handful of
+  // states too small to hold even one label in true geographic view
+  // (CALLOUT_STATES) get an external label on a leader line instead, which
+  // fades out as the grid view (with its guaranteed cell size) takes over.
+  // Grid labels sit in a uniform cell size; geo labels are 2px smaller
+  // since real state shapes are often tighter.
+  const GRID_LABEL_SIZE = 22;
+  const GEO_LABEL_SIZE = 20;
+  function update(t) {
+    paths
+      .attr("d", (d) => (t === 0 ? d.fullGeoD : d.interp(t)))
+      .style("opacity", (d) => (d.abbr === "DC" ? 1 - t : 1));
+    labels
+      .attr("transform", (d) => {
+        const x = d.labelGeoC[0] + (d.gridC[0] - d.labelGeoC[0]) * t;
+        const y = d.labelGeoC[1] + (d.gridC[1] - d.labelGeoC[1]) * t;
+        return `translate(${x},${y})`;
+      })
+      .style("opacity", (d) => (d.isCallout ? t : 1));
+    labels
+      .select("text.abbr")
+      .style("font-size", `${GEO_LABEL_SIZE + (GRID_LABEL_SIZE - GEO_LABEL_SIZE) * t}px`);
+    callouts.style("opacity", 1 - t);
+    calloutLines.style("opacity", 1 - t);
+  }
+
+  const toggleBtn = document.getElementById("toggle");
+  const labelGeo = document.getElementById("labelGeo");
+  const labelGrid = document.getElementById("labelGrid");
+
+  // Below the 500px breakpoint (matches style.css's own mobile cutoff) a
+  // geographic map is too cramped to read — default to the grid there,
+  // and to the geographic view on wider screens.
+  let currentT = window.innerWidth < 500 ? 1 : 0;
+  let timer = null;
+
+  function setToggleUI(target) {
+    toggleBtn.setAttribute("aria-checked", target === 1);
+    labelGeo.classList.toggle("active", target === 0);
+    labelGrid.classList.toggle("active", target === 1);
+  }
+
+  function stopAnim() {
+    if (timer) { timer.stop(); timer = null; }
+  }
+
+  function animateTo(target) {
+    stopAnim();
+    const start = currentT;
+    const duration = 500;
+    timer = d3.timer((elapsed) => {
+      const tt = Math.min(1, elapsed / duration);
+      const eased = d3.easeCubicInOut(tt);
+      currentT = start + (target - start) * eased;
+      update(currentT);
+      if (tt >= 1) { timer.stop(); timer = null; }
+    });
+  }
+
+  toggleBtn.addEventListener("click", () => {
+    const target = currentT > 0.5 ? 0 : 1;
+    setToggleUI(target);
+    animateTo(target);
+  });
+
+  setToggleUI(currentT);
+  update(currentT);
+}).catch(() => {
+  statusEl.textContent = "Could not load state boundary data — check your network connection.";
+});
+</script>
+
+<script>
+// Reports this page's true content height to a parent Drupal page embedding
+// it in an iframe, so the iframe can be sized to fit instead of using a
+// fixed height that leaves whitespace (or clips content) at other widths.
+(function () {
+  if (window.parent === window) return;
+  const target = document.getElementById("container");
+  function reportHeight() {
+    window.parent.postMessage({ type: "diversity-embed-height", height: target.scrollHeight + 12 }, "*");
+  }
+  new ResizeObserver(reportHeight).observe(target);
+  window.addEventListener("load", reportHeight);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportHeight);
+})();
+</script>
+</body>
+</html>
