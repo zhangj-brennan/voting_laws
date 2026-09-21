@@ -80,8 +80,8 @@
   </div>
 
   <div class="footnote" style="margin-top:4px">
-    <strong>Source:</strong> The Brennan Center for Justice.<br />
-    <strong>Note:</strong> Parenthetical years are year enacted, and not legislative session.
+    <strong>Note:</strong> Parenthetical years are year enacted, and not legislative session.<br>
+    <strong>Source:</strong> Analysis of publicly available data as of September 1, 2026, by the Brennan Center and the Goldman School of Public Policy at UC Berkeley.<br />
   </div>
 </div>
 
@@ -349,6 +349,13 @@ Promise.all([
     tooltip.style("opacity", 0).style("pointer-events", "none");
   }
 
+  function highlightState(abbr) {
+    paths.filter((p) => p.abbr === abbr).classed("is-hover", true).raise();
+    labels.raise();
+    calloutLines.raise();
+    callouts.raise();
+  }
+
   const paths = svg
     .selectAll("path.state")
     .data(tileData, (d) => d.abbr)
@@ -357,7 +364,7 @@ Promise.all([
     .attr("fill", (d) => fillFor(d.category))
     .on("mousemove", (event, d) => {
       if (stickyAbbr) return;
-      d3.select(event.currentTarget).classed("is-hover", true);
+      highlightState(d.abbr);
       showTooltip(event, d);
     })
     .on("mouseleave", (event) => {
@@ -372,7 +379,7 @@ Promise.all([
         return;
       }
       paths.classed("is-hover", false);
-      d3.select(event.currentTarget).classed("is-hover", true);
+      highlightState(d.abbr);
       stickyAbbr = d.abbr;
       showTooltip(event, d);
       tooltip.style("pointer-events", "auto");
