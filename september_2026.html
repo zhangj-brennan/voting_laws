@@ -183,7 +183,7 @@ const tiles = Object.entries(GRID).map(([abbr, [col, row]]) => ({
 // Categories come from sept_enacted_map.csv's fill_var column.
 const CATEGORIES = [
   { key: "Expansive Only", color: "--blue", short: "Expansive", label: "Expansive only", textColor: "white" },
-  { key: "Mixed", color: "--purple", short: "Mixed", label: "Mixed", textColor: "white" },
+  { key: "Mixed", color: "url(#stripe-mixed)", short: "Mixed", label: "Mixed", textColor: "black" },
   { key: "Restrictive or Election Interference Only", color: "#FFCF01", short: "Restrictive", label: "Restrictive or election interference only", textColor: "black" }
 ];
 
@@ -212,7 +212,13 @@ const legendBuckets = d3.select("#legend-buckets")
 legendBuckets
   .append("div")
   .attr("class", "swatch")
-  .style("background", (d) => (d.key === null ? noneColor : categoryColors.get(d.key)));
+  .style("background", (d) => {
+    if (d.key === null) return noneColor;
+    if (d.key === "Mixed") {
+      return "repeating-linear-gradient(135deg, #007194, #007194 0.75px, #FFCF01 0.75px, #FFCF01 3.5px)";
+    }
+    return categoryColors.get(d.key);
+  });
 
 legendBuckets.append("span").text((d) => d.label);
 
@@ -268,6 +274,15 @@ Promise.all([
 
   const svg = d3.select("#map");
   const tooltip = d3.select("#tooltip");
+
+  // Diagonal yellow/blue stripe fill for the "Mixed" category, in place
+  // of a solid color.
+  svg.append("defs").html(`
+    <pattern id="stripe-mixed" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="7" height="7" fill="#007194"></rect>
+      <rect width="5.5" height="7" fill="#FFCF01"></rect>
+    </pattern>
+  `);
 
   const objectKey = topo.objects.states ? "states" : Object.keys(topo.objects)[0];
   const fc = topojson.feature(topo, topo.objects[objectKey]);
