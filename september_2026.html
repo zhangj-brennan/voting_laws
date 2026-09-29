@@ -526,9 +526,9 @@ Promise.all([
   // states too small to hold even one label in true geographic view
   // (CALLOUT_STATES) get an external label on a leader line instead, which
   // fades out as the grid view (with its guaranteed cell size) takes over.
-  // Grid labels sit in a uniform cell size; geo labels are 2px smaller
-  // since real state shapes are often tighter.
-  const GRID_LABEL_SIZE = 22;
+  // Grid labels sit in a uniform cell size, so they can run larger; geo
+  // labels stay smaller since real state shapes are often tighter.
+  const GRID_LABEL_SIZE = 28;
   const GEO_LABEL_SIZE = 20;
   function stateOpacity(d, t) {
     return (d.abbr === "DC" ? 1 - t : 1) * filterOpacityFor(d);
