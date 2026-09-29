@@ -43,6 +43,7 @@
     font-family: "BentonMedium";
     font-size: 22px;
   }
+  g.callout text.callout-value tspan.callout-category { font-family: "Benton"; }
 
   /* "Geographic" and "Grid" are unequal widths, which would otherwise skew
      the switch off-center within the centered flex group */
@@ -182,7 +183,7 @@ const tiles = Object.entries(GRID).map(([abbr, [col, row]]) => ({
 
 // Categories come from sept_enacted_map.csv's fill_var column.
 const CATEGORIES = [
-  { key: "Expansive Only", color: "--purple", short: "Expansive", label: "Expansive only", textColor: "white" },
+  { key: "Expansive Only", color: "--purple", short: "Expansive only", label: "Expansive only", textColor: "white" },
   { key: "Mixed", color: "url(#stripe-mixed)", short: "Mixed", label: "Mixed", textColor: "black" },
   { key: "Restrictive or Election Interference Only", color: "#FFCF01", short: "Restrictive", label: "Restrictive or election interference only", textColor: "black" }
 ];
@@ -334,7 +335,7 @@ Promise.all([
   const calloutData = tileData
     .filter((d) => d.isCallout)
     .sort((a, b) => a.geoC[1] - b.geoC[1]);
-  const CALLOUT_X = GRID_W + 20;
+  const CALLOUT_X = GRID_W + 17;
   const CALLOUT_GAP_Y = 44;
   const calloutAvgY = d3.mean(calloutData, (d) => d.geoC[1]);
   const calloutStartY = calloutAvgY - ((calloutData.length - 1) * CALLOUT_GAP_Y) / 2;
@@ -496,7 +497,11 @@ Promise.all([
   callouts
     .append("text")
     .attr("class", "callout-value")
-    .text((d) => (d.category === null ? d.abbr : `${d.abbr} ${categoryShort.get(d.category)}`));
+    .text((d) => d.abbr)
+    .filter((d) => d.category !== null)
+    .append("tspan")
+    .attr("class", "callout-category")
+    .text((d) => ` ${categoryShort.get(d.category)}`);
 
   // ---- Legend filter buttons ----
   // Clicking a legend swatch toggles that category as an active filter.
