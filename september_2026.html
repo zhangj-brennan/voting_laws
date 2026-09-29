@@ -242,13 +242,17 @@ const LABEL_OFFSETS = {
   MI: [8, 8]
 };
 
-// Per-state overrides for label fill color, when the category's default
-// text color doesn't have enough contrast against that state's fill.
-const LABEL_COLOR_OVERRIDES = {};
+// Per-state overrides for label fill color in the geographic view only,
+// where these labels spill past their small state shapes onto the white
+// background. In the grid view every label sits inside its square, so the
+// category's default text color applies.
+const GEO_LABEL_COLOR_OVERRIDES = {
+  HI: "black"
+};
 
 // States too small in true geographic view to hold their own abbr
 // label — given an external label off to the side, joined by a line.
-const CALLOUT_STATES = ["RI", "DE", "NJ", "MD"];
+const CALLOUT_STATES = ["RI", "CT", "DE", "NJ", "MD"];
 
 // DC gets no label at all (too small to hold one, and not worth a callout).
 const NO_LABEL_STATES = ["DC"];
@@ -433,8 +437,11 @@ Promise.all([
     if (stickyAbbr) closeSticky();
   });
 
-  const labelColor = (d) =>
-    LABEL_COLOR_OVERRIDES[d.abbr] || (d.category !== null ? categoryTextColor.get(d.category) : null);
+  // Geo overrides hold for the first half of the geo -> grid morph, then
+  // hand off to the category color as the shape settles into its square.
+  const labelColor = (d, t) =>
+    (t < 0.5 && GEO_LABEL_COLOR_OVERRIDES[d.abbr]) ||
+    (d.category !== null ? categoryTextColor.get(d.category) : null);
 
   const labels = svg
     .selectAll("g.state-label")
@@ -445,7 +452,6 @@ Promise.all([
   labels
     .append("text")
     .attr("class", "abbr")
-    .style("fill", labelColor)
     .text((d) => d.abbr);
 
   const calloutLines = svg
@@ -548,7 +554,8 @@ Promise.all([
       .style("opacity", (d) => (d.isCallout ? t : 1) * filterOpacityFor(d));
     labels
       .select("text.abbr")
-      .style("font-size", `${GEO_LABEL_SIZE + (GRID_LABEL_SIZE - GEO_LABEL_SIZE) * t}px`);
+      .style("font-size", `${GEO_LABEL_SIZE + (GRID_LABEL_SIZE - GEO_LABEL_SIZE) * t}px`)
+      .style("fill", (d) => labelColor(d, t));
     callouts.style("opacity", (d) => (1 - t) * filterOpacityFor(d));
     calloutLines.style("opacity", (d) => (1 - t) * filterOpacityFor(d));
   }
