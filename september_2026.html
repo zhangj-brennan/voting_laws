@@ -215,7 +215,7 @@ legendBuckets
   .style("background", (d) => {
     if (d.key === null) return noneColor;
     if (d.key === "Mixed") {
-      return "repeating-linear-gradient(135deg, #711471, #711471 0.75px, #FFCF01 0.75px, #FFCF01 3.5px)";
+      return "repeating-linear-gradient(135deg, #AA72AA, #AA72AA 0.75px, #FFCF01 0.75px, #FFCF01 6px)";
     }
     return categoryColors.get(d.key);
   });
@@ -232,7 +232,7 @@ const LABEL_OFFSETS = {
   VT: [-2, -12],
   WA: [0, 2],
   NY: [2, 0],
-  KY: [0, 2],
+  KY: [0, -1],
   CT: [4, -2],
   WV: [-2, -2],
   MA: [0, -9],
@@ -278,9 +278,9 @@ Promise.all([
   // Diagonal yellow/purple stripe fill for the "Mixed" category, in place
   // of a solid color.
   svg.append("defs").html(`
-    <pattern id="stripe-mixed" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-      <rect width="7" height="7" fill="#711471"></rect>
-      <rect width="5.5" height="7" fill="#FFCF01"></rect>
+    <pattern id="stripe-mixed" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="12" height="12" fill="#AA72AA"></rect>
+      <rect width="10.5" height="12" fill="#FFCF01"></rect>
     </pattern>
   `);
 
@@ -360,15 +360,30 @@ Promise.all([
 
   function closeSticky() {
     stickyAbbr = null;
-    paths.classed("is-hover", false);
+    clearHighlight();
     tooltip.style("opacity", 0).style("pointer-events", "none");
   }
 
+  // The rollover outline is a single dedicated path layered above every
+  // state (and below the labels), rather than the hovered state's own
+  // stroke — so neighboring states' white borders can never paint over it,
+  // and state paths never need re-ordering under the cursor.
+  const pathD = (d, t) => (t === 0 ? d.fullGeoD : d.interp(t));
+  let hoverAbbr = null;
   function highlightState(abbr) {
-    paths.filter((p) => p.abbr === abbr).classed("is-hover", true).raise();
-    labels.raise();
-    calloutLines.raise();
-    callouts.raise();
+    if (abbr === hoverAbbr) return;
+    hoverAbbr = abbr;
+    const d = tileData.find((p) => p.abbr === abbr);
+    hoverOutline
+      .datum(d)
+      .attr("d", pathD(d, currentT))
+      .style("opacity", stateOpacity(d, currentT))
+      .style("display", null);
+  }
+
+  function clearHighlight() {
+    hoverAbbr = null;
+    hoverOutline.style("display", "none");
   }
 
   const paths = svg
@@ -382,9 +397,9 @@ Promise.all([
       highlightState(d.abbr);
       showTooltip(event, d);
     })
-    .on("mouseleave", (event) => {
+    .on("mouseleave", () => {
       if (stickyAbbr) return;
-      d3.select(event.currentTarget).classed("is-hover", false);
+      clearHighlight();
       tooltip.style("opacity", 0);
     })
     .on("click", (event, d) => {
@@ -393,12 +408,28 @@ Promise.all([
         closeSticky();
         return;
       }
-      paths.classed("is-hover", false);
       highlightState(d.abbr);
       stickyAbbr = d.abbr;
       showTooltip(event, d);
       tooltip.style("pointer-events", "auto");
     });
+
+  const hoverOutline = svg
+    .append("path")
+    .attr("class", "hover-outline")
+    .style("fill", "none")
+    .style("stroke", "black")
+    .style("stroke-width", 3)
+    .style("stroke-linejoin", "round")
+    .style("pointer-events", "none")
+    .style("display", "none");
+
+  // Backstop: leaving the map entirely always clears the outline.
+  svg.on("mouseleave", () => {
+    if (stickyAbbr) return;
+    clearHighlight();
+    tooltip.style("opacity", 0);
+  });
 
   tooltip.on("click", (event) => event.stopPropagation());
   d3.select(document).on("click", () => {
@@ -442,9 +473,9 @@ Promise.all([
       highlightState(d.abbr);
       showTooltip(event, d);
     })
-    .on("mouseleave", (event, d) => {
+    .on("mouseleave", () => {
       if (stickyAbbr) return;
-      paths.filter((p) => p.abbr === d.abbr).classed("is-hover", false);
+      clearHighlight();
       tooltip.style("opacity", 0);
     })
     .on("click", (event, d) => {
@@ -453,7 +484,6 @@ Promise.all([
         closeSticky();
         return;
       }
-      paths.classed("is-hover", false);
       highlightState(d.abbr);
       stickyAbbr = d.abbr;
       showTooltip(event, d);
@@ -500,10 +530,18 @@ Promise.all([
   // since real state shapes are often tighter.
   const GRID_LABEL_SIZE = 22;
   const GEO_LABEL_SIZE = 20;
+  function stateOpacity(d, t) {
+    return (d.abbr === "DC" ? 1 - t : 1) * filterOpacityFor(d);
+  }
+
   function update(t) {
     paths
-      .attr("d", (d) => (t === 0 ? d.fullGeoD : d.interp(t)))
-      .style("opacity", (d) => (d.abbr === "DC" ? 1 - t : 1) * filterOpacityFor(d));
+      .attr("d", (d) => pathD(d, t))
+      .style("opacity", (d) => stateOpacity(d, t));
+    if (hoverAbbr) {
+      const d = hoverOutline.datum();
+      hoverOutline.attr("d", pathD(d, t)).style("opacity", stateOpacity(d, t));
+    }
     labels
       .attr("transform", (d) => {
         const x = d.labelGeoC[0] + (d.gridC[0] - d.labelGeoC[0]) * t;
